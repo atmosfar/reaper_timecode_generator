@@ -1,0 +1,185 @@
+desc:SMPTE LTC Generator
+//tags: utility
+//author: atmosfar
+
+in_pin:none
+out_pin:left output
+out_pin:right output
+
+// This script generates SMPTE timecode based on either the system's current time
+// or the project's playback position. It supports 24, 25, 30, and 29.97DF.
+// Note that the acquisition of the timestamp takes place in @block so may not be
+// an exact match to the Reaper TCP timestamp.
+
+slider1:0<0,1,1{Time-of-Day,Project Position}>Timecode Source
+slider2:4<0,4,1{23.976 ND,24,25,29.97 DF,30}>Framerate
+slider3:0<0,2,1{Left,Right,Both}>Output Channel
+slider4:-9<-40,0,0.1>Signal Level (dBFS)
+slider5:0<-24,24,1>Timezone Offset (Hours)
+
+@slider
+slider1 == 0 ? (
+  slider_show(slider5, 1)
+  ) : (
+  slider_show(slider5, 0)
+);
+
+
+@init
+SECS_PER_DAY = 86400;
+
+// Initialize sample-level variables for the @sample block
+bit_idx = 0;
+phase = 0.0;
+last_bit = 1;
+mid_bit_transitioned = 0;
+
+// Initialize frame data array
+frame_data[0] = 0;
+
+// Set the Sync Word permanently
+frame_data[64] = 0; frame_data[65] = 0; frame_data[66] = 1; frame_data[67] = 1;
+frame_data[68] = 1; frame_data[69] = 1; frame_data[70] = 1; frame_data[71] = 1;
+frame_data[72] = 1; frame_data[73] = 1; frame_data[74] = 1; frame_data[75] = 1;
+frame_data[76] = 1; frame_data[77] = 1; frame_data[78] = 0; frame_data[79] = 1;
+
+@block
+// Determine Time Source
+source_seconds = 0;
+slider1 == 0 ? ( // Time-of-Day
+  time_utc = time_precise();
+  tz_offset_seconds = slider5 * 3600;
+  time_local = time_utc + tz_offset_seconds;
+
+  total_days = floor(time_local / SECS_PER_DAY);
+  source_seconds = time_local - total_days * SECS_PER_DAY;
+) : ( // Project Position
+  source_seconds = play_position;
+);
+
+
+// Timecode Calculation and Frame Building based on Framerate
+is_df = slider2 == 3;
+frame_rate =
+  slider2 == 0 ? 24000/1001 :
+  slider2 == 1 ? 24 :
+  slider2 == 2 ? 25 :
+  slider2 == 3 ? 30000/1001 :
+  30;
+
+bit_duration_samples = srate / (frame_rate * 80);
+
+is_df ? ( // 29.97 DF Logic
+  // Drop-frame timecode drops 2 frames every minute, except for every 10th minute.
+  // This calculation converts real time into DF timecode.
+  total_frames_real = floor(source_seconds * frame_rate);
+  total_minutes_real = floor(source_seconds / 60);
+
+  num_ten_minute_chunks = floor(total_minutes_real / 10);
+  num_drop_minutes = total_minutes_real - num_ten_minute_chunks;
+
+  frames_to_add_back = num_drop_minutes * 2;
+  total_frames_tc = total_frames_real + frames_to_add_back;
+
+  ff = total_frames_tc % 30;
+  ss = floor(total_frames_tc / 30) % 60;
+  mm = floor(total_frames_tc / 1800) % 60;
+  hh = floor(total_frames_tc / 108000);
+) : ( // Non-Drop-Frame Logic (23.976, 24, 25, 30 fps)
+  frame_rate_int = floor(frame_rate + 0.5); // Round to nearest integer (24, 25, 30)
+  total_frames = floor(source_seconds * frame_rate);
+
+  ff = total_frames % frame_rate_int;
+
+  total_seconds_from_frames = floor(total_frames / frame_rate_int);
+  ss = total_seconds_from_frames % 60;
+  mm = floor(total_seconds_from_frames / 60) % 60;
+  hh = floor(total_seconds_from_frames / 3600);
+);
+
+// Build the LTC Frame for the current time
+// Clear previous timecode data (leaving sync word and user bits)
+memset(frame_data, 0, 64);
+
+// Set Frame Field
+digit = ff % 10;
+frame_data[0] = (digit >> 0) & 1; frame_data[1] = (digit >> 1) & 1;
+frame_data[2] = (digit >> 2) & 1; frame_data[3] = (digit >> 3) & 1;
+digit = floor(ff / 10);
+frame_data[8] = (digit >> 0) & 1; frame_data[9] = (digit >> 1) & 1;
+
+// Set Second Field
+digit = ss % 10;
+frame_data[16] = (digit >> 0) & 1; frame_data[17] = (digit >> 1) & 1;
+frame_data[18] = (digit >> 2) & 1; frame_data[19] = (digit >> 3) & 1;
+digit = floor(ss / 10);
+frame_data[24] = (digit >> 0) & 1; frame_data[25] = (digit >> 1) & 1;
+frame_data[26] = (digit >> 2) & 1;
+
+// Set Minute Field
+digit = mm % 10;
+frame_data[32] = (digit >> 0) & 1; frame_data[33] = (digit >> 1) & 1;
+frame_data[34] = (digit >> 2) & 1; frame_data[35] = (digit >> 3) & 1;
+digit = floor(mm / 10);
+frame_data[40] = (digit >> 0) & 1; frame_data[41] = (digit >> 1) & 1;
+frame_data[42] = (digit >> 2) & 1;
+
+// Set Hour Field
+digit = hh % 10;
+frame_data[48] = (digit >> 0) & 1; frame_data[49] = (digit >> 1) & 1;
+frame_data[50] = (digit >> 2) & 1; frame_data[51] = (digit >> 3) & 1;
+digit = floor(hh / 10);
+frame_data[56] = (digit >> 0) & 1; frame_data[57] = (digit >> 1) & 1;
+
+// Set Flags and Parity
+frame_data[10] = is_df; // Set Drop Frame Flag
+
+// Calculate Parity Bits (SMPTE 12M Compliant)
+ones = 0;
+i = 0;
+loop(4, ones += frame_data[i]; i+=1;);
+i=8;
+loop(2, ones+=frame_data[i]; i+=1;); ones+=frame_data[10];
+frame_data[27] = (ones % 2 == 0);
+ones = 0;
+i = 16;
+loop(4, ones += frame_data[i]; i+=1;);
+i=24;
+loop(3, ones+=frame_data[i]; i+=1;);
+frame_data[43] = (ones % 2 == 0);
+ones = 0;
+i = 32;
+loop(4, ones += frame_data[i]; i+=1;);
+i=40; loop(3, ones+=frame_data[i]; i+=1;);
+i=48; loop(4, ones+=frame_data[i]; i+=1;);
+i=56; loop(2, ones+=frame_data[i]; i+=1;);
+frame_data[59] = (ones % 2 == 0);
+
+@sample
+// Biphase Mark Encoding
+phase += 1.0;
+flip = 0;
+
+current_bit = frame_data[bit_idx];
+(current_bit == 1 && !mid_bit_transitioned && phase >= (bit_duration_samples / 2.0)) ? (
+  flip = 1;
+  mid_bit_transitioned = 1;
+);
+
+(phase >= bit_duration_samples) ? (
+  phase -= bit_duration_samples;
+  bit_idx = (bit_idx + 1) % 80;
+  flip = 1;
+  mid_bit_transitioned = 0;
+);
+
+flip ? last_bit = -last_bit;
+
+// Final Output
+level_gain = 10^(slider4 / 20);
+final_output = last_bit * level_gain;
+
+// Channel mapping based on slider3
+spl0 = (slider3 == 0 || slider3 == 2) ? final_output : 0;
+spl1 = (slider3 == 1 || slider3 == 2) ? final_output : 0;
+
