@@ -7,7 +7,7 @@ This JSFX script generates a SMPTE linear timecode audio signal that can be fed 
 
   
 
-![UI Screenshot](ui.png)
+![UI Demo Animation](demo.apng)
 
   
   
