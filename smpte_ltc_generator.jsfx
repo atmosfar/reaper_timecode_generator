@@ -1,4 +1,4 @@
-desc:SMPTE LTC Generator
+desc:SMPTE LTC Timecode Generator
 //tags: utility
 //author: atmosfar
 
@@ -96,6 +96,9 @@ is_df ? ( // 29.97 DF Logic
   mm = floor(total_seconds_from_frames / 60) % 60;
   hh = floor(total_seconds_from_frames / 3600);
 );
+
+  
+sprintf(#dbg_desc, "Timecode Gen: %02d:%02d:%02d:%02d \t %s", hh, mm, ss, ff, is_df ? "DF" : "NDF");
 
 // Build the LTC Frame for the current time
 // Clear previous timecode data (leaving sync word and user bits)
