@@ -16,14 +16,17 @@ This JSFX script generates a SMPTE linear timecode audio signal that can be fed 
 
 - Time-of-Day and Project Time as timecode source
 
-- Framerate: 23.976 / 24 / 25 / 29.97 DF / 30
+- Framerate selection and drop-frame calculation
 
-- Output channel
+- Output channel selection
+
+- Constant output or only during playback
 
 - Gain adjustment
 
-- Timezone offset
+- Sync adjustment in milliseconds for fine tuning
 
+- Timezone offset
   
 
 ## Installation
