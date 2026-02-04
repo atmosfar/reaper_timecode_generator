@@ -21,8 +21,6 @@ tod_sample_counter = 0;
 tod_is_initialized = 0;
 last_play_state = -1;
 
-updateFramerateConstants();
-
 // --- Memory Allocation ---
 bit_buffer = 0; // Array of 80 bits (0..79)
 // Sync Word: 0011 1111 1111 1101 (Bits 64-79)
@@ -128,6 +126,8 @@ function calculatePolarity() local(i, count, polarity_bit_idx) (
   );
   setBit(polarity_bit_idx, (count % 2) == 0);
 );
+
+updateFramerateConstants();
 
 @slider
 slider1 == 0 ? slider_show(slider7, 1) : slider_show(slider7, 0);
